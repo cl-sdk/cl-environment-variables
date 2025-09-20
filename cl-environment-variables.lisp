@@ -3,7 +3,8 @@
   (:export
    #:environment-variable
    #:define-env-vars
-   #:define-type-parser))
+   #:define-type-parser
+   #:raise-invalid-environment-variable))
 
 (in-package :cl-environment-variables)
 
@@ -13,13 +14,42 @@
   (setf (gethash ty types-table) parser))
 
 (defun string-to-boolean (x)
-  (string-equal (string-downcase x) "true"))
+  (let ((value (string-downcase x)))
+    (if (member value '("true" "false"))
+        (string-equal (string-downcase x) "true")
+        (raise-invalid-environment-variable :boolean x))))
+
+(defun string-to-integer (x)
+  (handler-case
+      (let ((value (parse-integer x)))
+        (if value
+            (string-equal (string-downcase x) "true")
+            (raise-invalid-environment-variable :integer x)))
+    (t (err)
+      (declare (ignore err))
+      (raise-invalid-environment-variable :integer x))))
 
 (define-type-parser :string #'identity)
-(define-type-parser :integer #'parse-integer)
+(define-type-parser :integer #'string-to-integer)
 (define-type-parser :boolean #'string-to-boolean)
 
-(defun validate-env-type (name x ty &optional default-value)
+(defun invalid-environment-variable-printer (condition stream)
+  (let ((control (simple-condition-format-control condition)))
+    (if control
+        (apply #'format stream
+               control
+               (simple-condition-format-arguments condition))
+        (error "No format-control for ~S" condition))))
+
+(define-condition invalid-environment-variable (simple-condition)
+  ()
+  (:report invalid-environment-variable-printer))
+
+(defun raise-invalid-environment-variable (ty value)
+  (error 'invalid-environment-variable
+         (format nil "~%[cl-environment-variables] `~A` is not of type `~A`. Value is `~A'.~%" name ty x)))
+
+(defun validate-env-type (x ty &optional default-value)
   (let ((fn (gethash ty types-table)))
     (handler-case
         (if (and (not x) default-value)
@@ -27,7 +57,7 @@
             (funcall fn x))
       (t (err)
         (declare (ignore err))
-        (format t "[cl-environment-variables] `~A` is not of type `~a`. Value is `~A'.~%" name ty x)))))
+        (error err)))))
 
 (defvar *env-specs* (make-hash-table :test 'equal))
 
