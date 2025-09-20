@@ -45,7 +45,8 @@
                                       (uiop:getenv env-name)
                                       type
                                       default-value)))))
-       vars))
+       vars)
+  t)
 
 (defun environment-variable (name)
   (gethash name *env-specs*))
