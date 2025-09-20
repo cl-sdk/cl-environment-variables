@@ -13,23 +13,29 @@
 (defun define-type-parser (ty parser)
   (setf (gethash ty types-table) parser))
 
-(defun string-to-boolean (x)
+(defun string-to-boolean (name ty x)
   (let ((value (string-downcase x)))
-    (if (member value '("true" "false"))
-        (string-equal (string-downcase x) "true")
-        (raise-invalid-environment-variable :boolean x))))
+    (if (string-equal "true" value)
+        t
+        (if (string-equal "false" value)
+            nil
+            (raise-invalid-environment-variable name ty x)))))
 
-(defun string-to-integer (x)
-  (handler-case
-      (let ((value (parse-integer x)))
-        (if value
-            (string-equal (string-downcase x) "true")
-            (raise-invalid-environment-variable :integer x)))
-    (t (err)
-      (declare (ignore err))
-      (raise-invalid-environment-variable :integer x))))
+(defun string-to-integer (name ty x)
+    (handler-case
+        (let ((value (parse-integer x)))
+          (if (not value)
+              (raise-invalid-environment-variable name ty x)
+              value))
+      (t (err)
+        (declare (ignore err))
+        (raise-invalid-environment-variable name ty x))))
 
-(define-type-parser :string #'identity)
+(defun string-as-string (name ty x)
+  (declare (ignore name ty))
+  x)
+
+(define-type-parser :string #'string-as-string)
 (define-type-parser :integer #'string-to-integer)
 (define-type-parser :boolean #'string-to-boolean)
 
@@ -45,37 +51,38 @@
   ()
   (:report invalid-environment-variable-printer))
 
-(defun raise-invalid-environment-variable (ty value)
+(defun raise-invalid-environment-variable (name ty value)
   (error 'invalid-environment-variable
-         (format nil "~%[cl-environment-variables] `~A` is not of type `~A`. Value is `~A'.~%" name ty x)))
+         :format-control "~%[cl-environment-variables] `~A` is not of type `~A`. Value is `~A'.~%"
+         :format-arguments (list name ty value)))
 
-(defun validate-env-type (x ty &optional default-value)
+(defun validate-env-type (name ty value  &optional default-value)
   (let ((fn (gethash ty types-table)))
-    (handler-case
-        (if (and (not x) default-value)
-            default-value
-            (funcall fn x))
-      (t (err)
-        (declare (ignore err))
-        (error err)))))
+    (if (and (not value) default-value)
+        default-value
+        (funcall fn name ty value))))
 
 (defvar *env-specs* (make-hash-table :test 'equal))
 
+(defun define-env-var (name type env-name &optional default-value)
+  (setf (gethash name *env-specs*)
+        (validate-env-type name
+                           type
+                           (uiop:getenv env-name)
+                           default-value)))
+
 (defmacro define-env-vars (&rest vars)
-  (map nil
-       (lambda (v)
-         (destructuring-bind (name type &rest props)
-             v
-           (declare (ignorable props))
-           (let* ((default-value (getf props :default nil))
-                  (real-name (string-upcase (string name)))
-                  (env-name (substitute #\_ #\- real-name)))
-             (setf (gethash name *env-specs*)
-                   (validate-env-type name
-                                      (uiop:getenv env-name)
-                                      type
-                                      default-value)))))
-       vars)
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     ,@(map nil
+            (lambda (v)
+              (destructuring-bind (name type &rest props)
+                  v
+                (declare (ignorable props))
+                (let* ((default-value (getf props :default nil))
+                       (real-name (string-upcase (string name)))
+                       (env-name (substitute #\_ #\- real-name)))
+                  `(define-env-var ,name ,type ,env-name ,default-value))))
+            vars))
   t)
 
 (defun environment-variable (name)
