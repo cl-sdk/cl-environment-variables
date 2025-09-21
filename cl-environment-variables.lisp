@@ -72,17 +72,16 @@
                            default-value)))
 
 (defmacro define-env-vars (&rest vars)
-  `(eval-when (:compile-toplevel :load-toplevel :execute)
-     ,@(map nil
-            (lambda (v)
-              (destructuring-bind (name type &rest props)
-                  v
-                (declare (ignorable props))
-                (let* ((default-value (getf props :default nil))
-                       (real-name (string-upcase (string name)))
-                       (env-name (substitute #\_ #\- real-name)))
-                  `(define-env-var ,name ,type ,env-name ,default-value))))
-            vars))
+  (map nil
+       (lambda (v)
+         (destructuring-bind (name type &rest props)
+             v
+           (declare (ignorable props))
+           (let* ((default-value (getf props :default nil))
+                  (real-name (string-upcase (string name)))
+                  (env-name (substitute #\_ #\- real-name)))
+             (define-env-var name type env-name default-value))))
+       vars)
   t)
 
 (defun environment-variable (name)
